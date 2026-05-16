@@ -13,7 +13,7 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 class OSEDiffDegradation:
-    """生成训练用的真实退化低清图像。"""
+    """生成低清图。"""
 
     def __init__(self, scale_factor=4):
         self.scale_factor = scale_factor
@@ -93,7 +93,7 @@ class OSEDiffDegradation:
 
 
 class SRDataset(Dataset):
-    """读取配对数据或在线生成低清训练样本。"""
+    """搞成对训练样本。"""
 
     IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp"}
 
