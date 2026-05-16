@@ -8,7 +8,7 @@ from urllib.request import ProxyHandler, Request, build_opener
 
 
 def patch_hf_cache_home() -> None:
-    """兼容旧版diffusers需要的huggingface接口。"""
+    """兼容"""
     try:
         import huggingface_hub as hh
         import huggingface_hub.constants as hh_constants
@@ -106,7 +106,7 @@ def patch_hf_cache_home() -> None:
 
 
 def import_sana_pipeline() -> Any:
-    """导入当前环境可用的SanaPipeline。"""
+    """导入"""
     patch_hf_cache_home()
 
     try:
