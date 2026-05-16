@@ -4,17 +4,17 @@
 
 This repository provides the **minimal training-code release** of SANA-SR. It follows the paper implementation while intentionally keeping only the lowest-level training pipeline required to reproduce the main method. Testing code, pretrained models, complete benchmark scripts, and demos are listed as TODOs and will be released separately.
 
-[[Paper]](TODO) [[Project Page]](TODO) [[Pretrained Models]](TODO)
+[[Paper]] [[Project Page]] [[Pretrained Models]]
 
 ## News
 
-- **2026-05-12:** Minimal training-code repository initialized.
+- **2026-05-12:** This repo is released.
 
 ---
 
 ## Abstract
 
-Real-world image super-resolution aims to recover high-quality images from complex and unknown degradations. Existing generative Real-ISR methods often inherit dense latent representations and costly high-resolution token interactions, limiting practical deployment. SANA-SR revisits Real-ISR from the perspectives of compact latent representation and linear-complexity modeling. It adapts a pretrained SANA prior into a one-step restoration model by combining a 32x deep-compression autoencoder, a prompt-conditioned LinearDiT backbone, and LoRA fine-tuning.
+Real-world image super-resolution aims to recover high-quality images from complex and unknown real-world degradations. However, existing generative Real-ISR methods largely inherit the dense latent representations and quadratic-cost global modeling paradigm developed for high-resolution image synthesis, causing computation, memory usage, and inference latency to scale unfavorably with resolution and thus limiting practical deployment. We argue that the key bottleneck lies not in insufficient restoration priors, but in excessive token redundancy and costly token interactions during high-resolution restoration. Motivated by this observation, we revisit Real-ISR from the perspectives of compact latent representation and linear complexity modeling, and propose SANA-SR, an efficient one-step restoration framework. Specifically, SANA-SR employs a deep compression autoencoder with a 32× compression ratio to drastically reduce latent tokens while preserving restoration-relevant structures and textures. On top of this compact latent space, we introduce a linear-attention DiT with LoRA fine-tuning, enabling efficient high-resolution restoration with linear-complexity token mixing. Extensive experiments on all benchmark datasets demonstrate that SANA-SR achieves highly competitive and often superior quantitative performance against existing methods, while restoring clearer and more realistic textures. Moreover, after pruning, the deployed model runs in 0.019s with 407.95G MACs and 344M parameters, highlighting its strong potential for practical mobile deployment.
 
 ---
 
@@ -176,16 +176,7 @@ TODO: Pretrained models, benchmark scripts, and reproduced quantitative results 
 
 ## Citation
 
-If this project is helpful, please cite:
-
-```bibtex
-@inproceedings{qiao2026sanasr,
-  title={Efficient One-Step Diffusion Restoration Model with Compact Token Compression and Linear Attention},
-  author={Qiao, Bingtian and Shi, Yue and Zhou, Yingjie and Guo, Yong and Zhai, Guangtao and Cao, Jiezhang},
-  booktitle={NeurIPS},
-  year={2026}
-}
-```
+TODO: This article has not yet been accepted.
 
 ---
 
