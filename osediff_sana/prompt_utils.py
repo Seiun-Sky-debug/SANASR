@@ -309,7 +309,7 @@ def encode_sana_prompts(
     device: torch.device,
     max_sequence_length: int = 300,
 ):
-    """编码SANA文本条件并返回嵌入和mask。"""
+    """编码SANA文本条件"""
     tokenizer.padding_side = "right"
     text_inputs = tokenizer(
         list(prompts),
@@ -338,7 +338,7 @@ def encode_sana_prompts(
 
 
 class TargetedPromptExtractor:
-    """用RAM或DAPE从图像生成目标提示词。"""
+    """RAM/DAPE提取。"""
 
     def __init__(
         self,
@@ -442,7 +442,7 @@ def select_prompt_images(
 
 
 def build_suffix_only_prompts(batch_size: int, prompt_suffix: str) -> List[str]:
-    """生成只含质量后缀的提示词。"""
+    """生成提示词。"""
     suffix = (prompt_suffix or "").strip()
     if not suffix:
         suffix = "high quality, detailed"
