@@ -22,17 +22,14 @@ training:
   lambda_vsd: 1.0
   lambda_vsd_lora: 1.0
   img_loss_batch_size: 4
-  # Main SANA-SR one-step generation setting.
   gen_timestep: 900
   num_train_timesteps: 1000
-  # OSEDiff distribution matching samples broad timesteps in [20, 980).
   noise_t_min: 70
   noise_t_max: 650
   max_grad_norm: 1.0
   ema_decay: 0.999
 
 prompting:
-  # SeeSR/OSEDiff-style targeted prompt extraction.
   prompt_source: "hq"
   ram_path: "<RAM_PATH>"
   ram_ft_path: "<DAPE_PATH>"
