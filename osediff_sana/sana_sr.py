@@ -4,7 +4,7 @@ from peft import LoraConfig, get_peft_model
 
 
 class SanaSRModel(nn.Module):
-    """封装冻结SANA组件与LoRA单步超分训练。"""
+    """冻结SANA，加LoRA"""
 
     def __init__(self, vae, transformer, scheduler, cfg, steps=1000):
         super().__init__()
@@ -39,7 +39,6 @@ class SanaSRModel(nn.Module):
         return (z - self.shift) * self.scale
 
     def decode(self, latents):
-        """解码潜变量得到超分图像。"""
         z = latents / self.scale + self.shift
         kind = next(self.vae.parameters()).dtype
         z = z.to(dtype=kind)
@@ -51,7 +50,7 @@ class SanaSRModel(nn.Module):
         return out
 
     def get_timestep_sigma_by_index(self, index, batch_size, device, dtype):
-        """按索引读取训练时间步和噪声系数。"""
+        """读训练时间步和噪声系数"""
         if isinstance(index, int):
             i = torch.full((batch_size,), index, device=device, dtype=torch.long)
         else:
@@ -65,12 +64,11 @@ class SanaSRModel(nn.Module):
         return t, sigma
 
     def add_noise(self, z, noise, sigma):
-        """向潜变量加入调度噪声。"""
         sigma = sigma.view(-1, 1, 1, 1).to(z.dtype)
         return (1 - sigma) * z + sigma * noise
 
     def one_step_denoise(self, z, sigma):
-        """执行一次潜空间去噪更新。"""
+        """一步更新"""
         sigma = sigma.view(-1, 1, 1, 1).to(z.dtype)
         return z - sigma * self.last
 
@@ -134,7 +132,7 @@ class SanaSRModel(nn.Module):
 
 
 def setup_lora(transformer, config):
-    """冻结主干并注入LoRA训练参数。"""
+    """注入LoRA训练参数"""
     for p in transformer.parameters():
         p.requires_grad_(False)
 
