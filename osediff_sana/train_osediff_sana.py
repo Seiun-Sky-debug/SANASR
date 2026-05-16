@@ -91,7 +91,6 @@ def encode_prompt_batch(pipe: SanaPipeline, prompts, device: torch.device):
 
 
 def resolve_lora_dir(path_str: str):
-    """解析LoRA目录或权重文件路径。"""
     if not path_str:
         return None
     path = Path(path_str)
