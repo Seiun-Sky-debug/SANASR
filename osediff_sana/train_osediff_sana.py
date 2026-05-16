@@ -1,15 +1,3 @@
-"""
-Standalone OSEDiff-style SANA training.
-
-This branch intentionally separates from previous experiments:
-  - No HF loss
-  - No FiDeSR detail weighting
-  - No FluxSR trajectory distillation
-  - Prompting follows RAM / DAPE targeted prompting instead of a fixed sentence
-
-Core loss = L2 + LPIPS + optional DINO + VSD + VSD_LoRA
-"""
-
 import argparse
 import os
 import random
@@ -17,7 +5,6 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 
-# Make project root importable when running `python osediff_sana/train_osediff_sana.py`
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -104,12 +91,7 @@ def encode_prompt_batch(pipe: SanaPipeline, prompts, device: torch.device):
 
 
 def resolve_lora_dir(path_str: str):
-    """
-    Resolve a LoRA adapter directory from:
-      - checkpoint dir (contains ./lora)
-      - direct lora dir (contains adapter_model.safetensors)
-      - direct adapter file path
-    """
+    """解析LoRA目录或权重文件路径。"""
     if not path_str:
         return None
     path = Path(path_str)
@@ -126,9 +108,9 @@ def resolve_lora_dir(path_str: str):
 
 
 def _get_param_root(model):
-    # During training we sometimes pass the wrapped SanaSRModel, and sometimes
-    # the raw transformer / PeftModel before wrapping. Support both.
-    return model.transformer if hasattr(model, "transformer") else model
+    if hasattr(model, "transformer"):
+        return model.transformer
+    return model
 
 
 def _iter_trainable_lora_params(model):
@@ -165,6 +147,12 @@ def trainable_lora_params_are_finite(model) -> bool:
         if not torch.isfinite(p.detach()).all():
             return False
     return True
+
+
+def safe_value(x):
+    if torch.isfinite(x):
+        return float(x.item())
+    return float("nan")
 
 
 def init_ema_state(model):
@@ -418,11 +406,11 @@ def train_one_step(model, lpips_model, dino_model, batch, te, tm, optimizer_g, c
         optimizer_g.zero_grad(set_to_none=True)
         return {
             "loss_g": float("nan"),
-            "loss_l2": float(loss_l2.item()) if torch.isfinite(loss_l2) else float("nan"),
-            "loss_lpips": float(loss_lpips.item()) if torch.isfinite(loss_lpips) else float("nan"),
-            "loss_dino": float(loss_dino.item()) if torch.isfinite(loss_dino) else float("nan"),
-            "loss_vsd": float(loss_vsd.item()) if torch.isfinite(loss_vsd) else float("nan"),
-            "loss_vsd_lora": float(loss_vsd_lora.item()) if torch.isfinite(loss_vsd_lora) else float("nan"),
+            "loss_l2": safe_value(loss_l2),
+            "loss_lpips": safe_value(loss_lpips),
+            "loss_dino": safe_value(loss_dino),
+            "loss_vsd": safe_value(loss_vsd),
+            "loss_vsd_lora": safe_value(loss_vsd_lora),
             "loss_prompt_consistency": float(loss_prompt_consistency.item())
             if torch.isfinite(loss_prompt_consistency)
             else float("nan"),
@@ -445,11 +433,11 @@ def train_one_step(model, lpips_model, dino_model, batch, te, tm, optimizer_g, c
         optimizer_g.zero_grad(set_to_none=True)
         return {
             "loss_g": float("nan"),
-            "loss_l2": float(loss_l2.item()) if torch.isfinite(loss_l2) else float("nan"),
-            "loss_lpips": float(loss_lpips.item()) if torch.isfinite(loss_lpips) else float("nan"),
-            "loss_dino": float(loss_dino.item()) if torch.isfinite(loss_dino) else float("nan"),
-            "loss_vsd": float(loss_vsd.item()) if torch.isfinite(loss_vsd) else float("nan"),
-            "loss_vsd_lora": float(loss_vsd_lora.item()) if torch.isfinite(loss_vsd_lora) else float("nan"),
+            "loss_l2": safe_value(loss_l2),
+            "loss_lpips": safe_value(loss_lpips),
+            "loss_dino": safe_value(loss_dino),
+            "loss_vsd": safe_value(loss_vsd),
+            "loss_vsd_lora": safe_value(loss_vsd_lora),
             "loss_prompt_consistency": float(loss_prompt_consistency.item())
             if torch.isfinite(loss_prompt_consistency)
             else float("nan"),
@@ -462,7 +450,10 @@ def train_one_step(model, lpips_model, dino_model, batch, te, tm, optimizer_g, c
     for p in model.transformer.parameters():
         if p.requires_grad and p.grad is not None:
             grad_norm_sq = grad_norm_sq + p.grad.detach().float().pow(2).sum()
-    lora_grad_norm = grad_norm_sq.sqrt() if grad_norm_sq.item() > 0 else torch.tensor(0.0, device=device)
+    if grad_norm_sq.item() > 0:
+        lora_grad_norm = grad_norm_sq.sqrt()
+    else:
+        lora_grad_norm = torch.tensor(0.0, device=device)
 
     return {
         "loss_g": float(loss_g.item()),
@@ -492,9 +483,11 @@ def main():
     args = parser.parse_args()
 
     config = load_config(args.config)
-    device = torch.device(f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        device = torch.device(f"cuda:{args.gpu}")
+    else:
+        device = torch.device("cpu")
 
-    # ---- Load SANA ----
     model_path = config["model"]["sana_path"]
     print(f"[INFO] Loading SANA pipeline from: {model_path}")
     model_dtype = parse_torch_dtype(config.get("model", {}).get("weight_dtype", "fp16"), default=torch.float16)
@@ -522,9 +515,12 @@ def main():
             negative_terms=prompt_cfg.get("negative_terms", []),
         )
 
-    # ---- Setup LoRA ----
-    resume_lora_path = resolve_lora_dir(args.resume) if args.resume else None
-    init_lora_path = resolve_lora_dir(args.init_lora_path) if args.init_lora_path else None
+    resume_lora_path = None
+    if args.resume:
+        resume_lora_path = resolve_lora_dir(args.resume)
+    init_lora_path = None
+    if args.init_lora_path:
+        init_lora_path = resolve_lora_dir(args.init_lora_path)
     if resume_lora_path:
         from peft import PeftModel
 
@@ -562,7 +558,9 @@ def main():
         eps=tc.get("adam_epsilon", 1e-8),
     )
     ema_decay = float(tc.get("ema_decay", 0.0))
-    ema_state = init_ema_state(model) if ema_decay > 0 else None
+    ema_state = None
+    if ema_decay > 0:
+        ema_state = init_ema_state(model)
 
     lambda_lpips = float(tc.get("lambda_lpips", 2.0))
     lambda_dino = float(tc.get("lambda_dino", 0.0))
@@ -602,7 +600,9 @@ def main():
     log_cfg = config["logging"]
     output_dir = log_cfg["output_dir"]
     os.makedirs(output_dir, exist_ok=True)
-    writer = SummaryWriter(os.path.join(output_dir, "tb_logs")) if log_cfg["use_tensorboard"] else None
+    writer = None
+    if log_cfg["use_tensorboard"]:
+        writer = SummaryWriter(os.path.join(output_dir, "tb_logs"))
 
     global_step = 0
     if args.resume:
@@ -611,8 +611,6 @@ def main():
             if loaded_ema is not None:
                 ema_state = loaded_ema
             else:
-                # Resume from legacy checkpoints without EMA by bootstrapping
-                # EMA from the resumed trainable LoRA weights.
                 ema_state = init_ema_state(model)
         print(f"[RESUME] From step {global_step}")
 
@@ -763,9 +761,12 @@ def main():
                     for k, v in losses.items():
                         writer.add_scalar(f"train/{k}", v, global_step)
                     if ram_prompt_start_step > 0:
+                        use = 0.0
+                        if global_step > ram_prompt_start_step:
+                            use = 1.0
                         writer.add_scalar(
                             "train/use_ram_prompt",
-                            1.0 if global_step > ram_prompt_start_step else 0.0,
+                            use,
                             global_step,
                         )
 

@@ -1,16 +1,3 @@
-"""
-Prompt extraction utilities for the OSEDiff-SANA branch.
-
-Targeted prompt generation follows the RAM / DAPE usage pattern in SeeSR/OSEDiff:
-  - OSEDiff training: GT image -> RAM caption
-  - OSEDiff inference: LQ image -> DAPE(RAM+ft) caption
-
-We expose both so that SANA can try:
-  - HQ prompt
-  - LQ prompt
-with either plain RAM or DAPE-style fine-tuned RAM.
-"""
-
 from __future__ import annotations
 
 import os
@@ -66,11 +53,6 @@ def _iter_ram_search_roots() -> List[Path]:
 
 
 def _ensure_local_ram_on_path():
-    """
-    Allow users to provide an external SeeSR/RAM checkout via environment
-    variable or common local checkout paths instead of bundling third-party
-    source code in this repository.
-    """
     for root in _iter_ram_search_roots():
         try:
             root = root.resolve()
@@ -87,7 +69,6 @@ def _ensure_local_ram_on_path():
 
 
 def _to_pil_list(images: torch.Tensor) -> List[Image.Image]:
-    # images: [B, 3, H, W] in [0,1]
     to_pil = transforms.ToPILImage()
     return [to_pil(img.cpu()) for img in images]
 
@@ -118,7 +99,10 @@ def _ensure_list(value) -> List[str]:
         return [v for v in parts if v]
     if isinstance(value, (list, tuple)):
         return [str(v).strip() for v in value if str(v).strip()]
-    return [str(value).strip()] if str(value).strip() else []
+    text = str(value).strip()
+    if text:
+        return [text]
+    return []
 
 
 def _normalize_caption(caption: str) -> str:
@@ -159,7 +143,9 @@ def _tags_to_content_phrase(tags: Sequence[str], max_tags: int = 8) -> str:
 
 def _compose_quality_phrase(prompt_suffix: str) -> str:
     suffix = _normalize_caption(prompt_suffix)
-    return suffix if suffix else DEFAULT_QUALITY_SUFFIX
+    if suffix:
+        return suffix
+    return DEFAULT_QUALITY_SUFFIX
 
 
 def build_prompt_from_caption(
@@ -177,7 +163,9 @@ def build_prompt_from_caption(
     if prompt_format == "tags_only":
         return caption or suffix
     if prompt_format == "tags_suffix":
-        return f"{caption}, {suffix}" if caption else suffix
+        if caption:
+            return f"{caption}, {suffix}"
+        return suffix
     if prompt_format != "restoration_instruction":
         raise ValueError(
             f"Unsupported prompt_format={prompt_format}. "
@@ -268,7 +256,9 @@ def build_primary_secondary_prompts(
 
     lambda_consistency = float(prompt_cfg.get("lambda_prompt_consistency", 0.0))
     primary_prompts: List[str] = []
-    secondary_prompts: List[str] | None = [] if lambda_consistency > 0 else None
+    secondary_prompts = None
+    if lambda_consistency > 0:
+        secondary_prompts = []
     instruction_mode = prompt_cfg.get("instruction_template_mode", "fixed")
     instruction_template_id = int(prompt_cfg.get("instruction_template_id", 0))
 
@@ -281,7 +271,7 @@ def build_primary_secondary_prompts(
                 [caption],
                 prompt_suffix=suffix,
                 prompt_format=primary_mode,
-                template_mode=instruction_mode if primary_mode == "restoration_instruction" else "fixed",
+                template_mode=instruction_mode,
                 template_id=instruction_template_id,
                 preserve_terms=preserve_terms,
                 negative_terms=negative_terms,
@@ -289,17 +279,20 @@ def build_primary_secondary_prompts(
             )[0]
         )
         if secondary_prompts is not None:
-            secondary_mode = (
-                "tags_suffix"
-                if primary_mode == "restoration_instruction"
-                else "restoration_instruction"
-            )
+            if primary_mode == "restoration_instruction":
+                secondary_mode = "tags_suffix"
+            else:
+                secondary_mode = "restoration_instruction"
+            if secondary_mode == "restoration_instruction":
+                mode = instruction_mode
+            else:
+                mode = "fixed"
             secondary_prompts.append(
                 build_prompts_from_captions(
                     [caption],
                     prompt_suffix=suffix,
                     prompt_format=secondary_mode,
-                    template_mode=instruction_mode if secondary_mode == "restoration_instruction" else "fixed",
+                    template_mode=mode,
                     template_id=instruction_template_id,
                     preserve_terms=preserve_terms,
                     negative_terms=negative_terms,
@@ -316,10 +309,7 @@ def encode_sana_prompts(
     device: torch.device,
     max_sequence_length: int = 300,
 ):
-    """
-    Mirror SANA's Gemma prompt encoding path so masks stay aligned with the
-    transformer's caption projection.
-    """
+    """编码SANA文本条件并返回嵌入和mask。"""
     tokenizer.padding_side = "right"
     text_inputs = tokenizer(
         list(prompts),
@@ -336,9 +326,10 @@ def encode_sana_prompts(
             text_inputs.input_ids.to(device),
             attention_mask=prompt_attention_mask,
         )
-        prompt_embeds = (
-            prompt_embeds[0] if isinstance(prompt_embeds, (tuple, list)) else prompt_embeds.last_hidden_state
-        )
+        if isinstance(prompt_embeds, (tuple, list)):
+            prompt_embeds = prompt_embeds[0]
+        else:
+            prompt_embeds = prompt_embeds.last_hidden_state
 
     select_index = [0] + list(range(-max_sequence_length + 1, 0))
     prompt_embeds = prompt_embeds[:, select_index]
@@ -347,6 +338,8 @@ def encode_sana_prompts(
 
 
 class TargetedPromptExtractor:
+    """用RAM或DAPE从图像生成目标提示词。"""
+
     def __init__(
         self,
         ram_path: str,
@@ -371,7 +364,6 @@ class TargetedPromptExtractor:
         self.model = self._load_model(ram_path=ram_path, ram_ft_path=ram_ft_path, device=device, dtype=dtype)
 
     def _load_model(self, ram_path: str, ram_ft_path: str, device: str, dtype: torch.dtype):
-        # DAPE / OSEDiff inference style: ram_lora with pretrained_condition
         if ram_ft_path:
             try:
                 from ram.models.ram_lora import ram
@@ -398,16 +390,19 @@ class TargetedPromptExtractor:
                         "Failed to import `ram` package. Install a compatible "
                         "SeeSR/RAM package or set SEESR_ROOT first."
                     ) from e
-            model = ram(
-                pretrained=ram_path,
-                pretrained_condition=None if "ram_lora" in ram.__module__ else None,
-                image_size=384,
-                vit="swin_l",
-            ) if "ram_lora" in ram.__module__ else ram(
-                pretrained=ram_path,
-                image_size=384,
-                vit="swin_l",
-            )
+            if "ram_lora" in ram.__module__:
+                model = ram(
+                    pretrained=ram_path,
+                    pretrained_condition=None,
+                    image_size=384,
+                    vit="swin_l",
+                )
+            else:
+                model = ram(
+                    pretrained=ram_path,
+                    image_size=384,
+                    vit="swin_l",
+                )
         model.eval()
         model.to(device=device, dtype=dtype)
         return model
@@ -447,10 +442,7 @@ def select_prompt_images(
 
 
 def build_suffix_only_prompts(batch_size: int, prompt_suffix: str) -> List[str]:
-    """
-    Fixed text conditioning without RAM tags: repeat `prompt_suffix` for each sample.
-    Use for early training when only a quality-style suffix is desired.
-    """
+    """生成只含质量后缀的提示词。"""
     suffix = (prompt_suffix or "").strip()
     if not suffix:
         suffix = "high quality, detailed"

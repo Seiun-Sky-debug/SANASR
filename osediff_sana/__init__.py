@@ -1,3 +1,0 @@
-"""
-OSEDiff-SANA public package.
-"""

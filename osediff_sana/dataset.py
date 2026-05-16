@@ -1,7 +1,3 @@
-"""
-SR Dataset with optional OSEDiff-style degradation.
-"""
-
 import random
 from pathlib import Path
 
@@ -17,17 +13,13 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 class OSEDiffDegradation:
-    """
-    OSEDiff/Real-ESRGAN style two-order degradation pipeline (simplified).
-    Produces realistic low-quality inputs for real-world SR training.
-    """
+    """生成训练用的真实退化低清图像。"""
 
     def __init__(self, scale_factor=4):
         self.scale_factor = scale_factor
 
     @staticmethod
     def _sanitize(img):
-        """Make image numerically safe in [0,1]."""
         img = np.nan_to_num(img, nan=0.0, posinf=1.0, neginf=0.0).astype(np.float32)
         return np.clip(img, 0.0, 1.0)
 
@@ -50,10 +42,10 @@ class OSEDiffDegradation:
             scale = random.uniform(0.15, 1.0)
         else:
             scale = 1.0
-        out_h = max(8, int(h * scale))
-        out_w = max(8, int(w * scale))
+        oh = max(8, int(h * scale))
+        ow = max(8, int(w * scale))
         interp = random.choice([cv2.INTER_AREA, cv2.INTER_LINEAR, cv2.INTER_CUBIC])
-        out = cv2.resize(img, (out_w, out_h), interpolation=interp)
+        out = cv2.resize(img, (ow, oh), interpolation=interp)
         return OSEDiffDegradation._sanitize(out)
 
     @staticmethod
@@ -75,14 +67,14 @@ class OSEDiffDegradation:
     def _random_jpeg(img):
         img = OSEDiffDegradation._sanitize(img)
         q = random.randint(30, 95)
-        img_u8 = np.clip(img * 255.0, 0, 255).astype(np.uint8)
-        _, enc = cv2.imencode(".jpg", img_u8, [cv2.IMWRITE_JPEG_QUALITY, q])
+        u8 = np.clip(img * 255.0, 0, 255).astype(np.uint8)
+        _, enc = cv2.imencode(".jpg", u8, [cv2.IMWRITE_JPEG_QUALITY, q])
         dec = cv2.imdecode(enc, cv2.IMREAD_COLOR)
         dec = cv2.cvtColor(dec, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
         return OSEDiffDegradation._sanitize(dec)
 
     def __call__(self, hq_tensor):
-        _, H, W = hq_tensor.shape
+        _, h, w = hq_tensor.shape
         img = self._sanitize(hq_tensor.permute(1, 2, 0).numpy().astype(np.float32))
         img = self._random_blur(img)
         img = self._random_resize(img)
@@ -92,18 +84,16 @@ class OSEDiffDegradation:
         img = self._random_resize(img)
         img = self._random_noise(img)
         img = self._random_jpeg(img)
-        lq_h, lq_w = max(8, H // self.scale_factor), max(8, W // self.scale_factor)
-        img = cv2.resize(img, (lq_w, lq_h), interpolation=cv2.INTER_AREA)
-        img = cv2.resize(img, (W, H), interpolation=cv2.INTER_CUBIC)
+        lh = max(8, h // self.scale_factor)
+        lw = max(8, w // self.scale_factor)
+        img = cv2.resize(img, (lw, lh), interpolation=cv2.INTER_AREA)
+        img = cv2.resize(img, (w, h), interpolation=cv2.INTER_CUBIC)
         img = self._sanitize(img)
         return torch.from_numpy(img).permute(2, 0, 1).float()
 
 
 class SRDataset(Dataset):
-    """
-    If lq_dir is provided: load paired LQ-HQ images (RealSR compatible).
-    If lq_dir is empty/None: generate LQ on-the-fly from HQ via degradation pipeline.
-    """
+    """读取配对数据或在线生成低清训练样本。"""
 
     IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp"}
 
@@ -118,7 +108,9 @@ class SRDataset(Dataset):
     ):
         super().__init__()
         self.hq_dir = Path(hq_dir)
-        self.lq_dir = Path(lq_dir) if lq_dir else None
+        self.lq_dir = None
+        if lq_dir:
+            self.lq_dir = Path(lq_dir)
         self.image_size = image_size
         self.scale_factor = scale_factor
         self.is_train = is_train

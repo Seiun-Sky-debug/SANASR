@@ -8,9 +8,7 @@ from urllib.request import ProxyHandler, Request, build_opener
 
 
 def patch_hf_cache_home() -> None:
-    """
-    Backfill legacy huggingface_hub symbols expected by older diffusers builds.
-    """
+    """兼容旧版diffusers需要的huggingface接口。"""
     try:
         import huggingface_hub as hh
         import huggingface_hub.constants as hh_constants
@@ -75,7 +73,10 @@ def patch_hf_cache_home() -> None:
             **kwargs,
         ) -> str:
             del resume_download, kwargs
-            base_cache = Path(cache_dir) if cache_dir else Path(cache_home) / "hub"
+            if cache_dir:
+                base_cache = Path(cache_dir)
+            else:
+                base_cache = Path(cache_home) / "hub"
             download_dir = base_cache / "legacy_cached_downloads"
             download_dir.mkdir(parents=True, exist_ok=True)
 
@@ -105,9 +106,7 @@ def patch_hf_cache_home() -> None:
 
 
 def import_sana_pipeline() -> Any:
-    """
-    Import `SanaPipeline` with clearer compatibility handling.
-    """
+    """导入当前环境可用的SanaPipeline。"""
     patch_hf_cache_home()
 
     try:

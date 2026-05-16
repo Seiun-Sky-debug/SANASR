@@ -33,6 +33,8 @@ def _resolve_hw(processor) -> tuple[int, int]:
 
 
 class DinoPerceptualLoss(nn.Module):
+    """用冻结DINO特征计算感知损失。"""
+
     def __init__(
         self,
         model_name_or_path: str = "facebook/dinov2-large",
@@ -57,10 +59,10 @@ class DinoPerceptualLoss(nn.Module):
         self.target_height = int(height)
         self.target_width = int(width)
 
-        image_mean = getattr(self.processor, "image_mean", [0.485, 0.456, 0.406])
-        image_std = getattr(self.processor, "image_std", [0.229, 0.224, 0.225])
-        self.register_buffer("image_mean", torch.tensor(image_mean, dtype=torch.float32).view(1, 3, 1, 1), persistent=False)
-        self.register_buffer("image_std", torch.tensor(image_std, dtype=torch.float32).view(1, 3, 1, 1), persistent=False)
+        mean = getattr(self.processor, "image_mean", [0.485, 0.456, 0.406])
+        std = getattr(self.processor, "image_std", [0.229, 0.224, 0.225])
+        self.register_buffer("image_mean", torch.tensor(mean, dtype=torch.float32).view(1, 3, 1, 1), persistent=False)
+        self.register_buffer("image_std", torch.tensor(std, dtype=torch.float32).view(1, 3, 1, 1), persistent=False)
 
     def _prepare(self, images_01: torch.Tensor) -> torch.Tensor:
         x = images_01.float()
@@ -72,42 +74,45 @@ class DinoPerceptualLoss(nn.Module):
             antialias=True,
         )
         x = (x - self.image_mean) / self.image_std
-        model_dtype = next(self.backbone.parameters()).dtype
-        x = x.to(dtype=model_dtype)
+        kind = next(self.backbone.parameters()).dtype
+        x = x.to(dtype=kind)
         return x
 
     def _select_hidden_states(self, outputs) -> List[torch.Tensor]:
-        hidden_states = outputs.hidden_states
-        if hidden_states is None:
-            hidden_states = [outputs.last_hidden_state]
+        states = outputs.hidden_states
+        if states is None:
+            states = [outputs.last_hidden_state]
 
-        picked = []
-        total = len(hidden_states)
+        out = []
+        n = len(states)
         for idx in self.layer_indices:
-            real_idx = idx if idx >= 0 else total + idx
-            real_idx = max(0, min(total - 1, real_idx))
-            feat = hidden_states[real_idx]
-            if feat.ndim == 3 and feat.shape[1] > 1 and not self.use_cls_token:
-                feat = feat[:, 1:, :]
-            if self.normalize_features:
-                feat = F.normalize(feat.float(), dim=-1)
+            if idx >= 0:
+                i = idx
             else:
-                feat = feat.float()
-            picked.append(feat)
-        return picked
+                i = n + idx
+            i = max(0, min(n - 1, i))
+            x = states[i]
+            if x.ndim == 3 and x.shape[1] > 1 and not self.use_cls_token:
+                x = x[:, 1:, :]
+            if self.normalize_features:
+                x = F.normalize(x.float(), dim=-1)
+            else:
+                x = x.float()
+            out.append(x)
+        return out
 
     def forward(self, pred_01: torch.Tensor, target_01: torch.Tensor) -> torch.Tensor:
-        pred_in = self._prepare(pred_01)
-        target_in = self._prepare(target_01)
+        x = self._prepare(pred_01)
+        y = self._prepare(target_01)
 
-        pred_out = self.backbone(pred_in, output_hidden_states=True)
-        pred_feats = self._select_hidden_states(pred_out)
+        a = self.backbone(x, output_hidden_states=True)
+        afeat = self._select_hidden_states(a)
 
         with torch.no_grad():
-            target_out = self.backbone(target_in, output_hidden_states=True)
-            target_feats = [feat.detach() for feat in self._select_hidden_states(target_out)]
+            b = self.backbone(y, output_hidden_states=True)
+            bfeat = [z.detach() for z in self._select_hidden_states(b)]
 
-        loss = pred_feats[0].new_tensor(0.0)
-        for pred_feat, target_feat in zip(pred_feats, target_feats):
-            loss = loss + F.l1_loss(pred_feat, target_feat)
-        return loss / max(1, len(pred_feats))
+        loss = afeat[0].new_tensor(0.0)
+        for a, b in zip(afeat, bfeat):
+            loss = loss + F.l1_loss(a, b)
+        return loss / max(1, len(afeat))
