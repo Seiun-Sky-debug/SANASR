@@ -81,8 +81,8 @@ SANASR/
   requirements.txt
   configs/
     sanasr_hqprompt.yaml
-  osediff_sana/
-    train_osediff_sana.py
+  core/
+    train.py
     sana_sr.py
     dataset.py
     prompt_utils.py
@@ -140,7 +140,7 @@ Main placeholders:
 Launch training:
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 python osediff_sana/train_osediff_sana.py \
+CUDA_VISIBLE_DEVICES=0 python core/train.py \
   --config configs/sanasr_hqprompt.yaml \
   --gpu 0
 ```
